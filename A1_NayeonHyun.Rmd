@@ -28,13 +28,14 @@ library(GEOquery)
 library(edgeR)
 ```
 
+## Introduction
 
-### Why I chose this dataset
+### Why I Chose This Dataset
 
 For my dataset, I chose the paper, [Human germline biallelic complete NFAT1 deficiency causes the triad of joint contractures, osteochondromas, and susceptibility to B cell malignancy](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE193414). I chose a dataset that focuses on B-cell lymphoma as it was related to my BCB430 research. Since my research was on B-cells for B-cell lymphoma, I wanted to look at T-cells and this paper was the perfect dataset to do so. It looks at NFAT1 (nuclear factor of activated T cells 1) which mediates calcium-calcineurin signals that drive cell activation, survival, and proliferation. This paper sequences a human that has a complete deficiency of NAFT1 and analyzes the affect of this deficiency. They also sequence his parents, who have a consanguineous relationship. @sharma2022human
 
 
-### Basic information of the dataset
+### Basic Information on the Dataset
 
 There are 18 bulk RNA-seq samples from three patients. One patient is the first reported case of human complete NFAT1 deficiency. The other two are his parents who had a consanguineous relationship. Illumina NextSeq 500 was used for sequencing. Half of the 18 samples (labelled as "patient") are infected with an empty vector, thus is the negative control. The other 9 samples are infected with WT-NFATC2 which is the test condition.
 
@@ -44,7 +45,7 @@ In the paper, they confirmed the functions of NFAT1 regarding cell-death, where 
 
 ![Figure 1: Measurement of percent cell death in chondrocytes. @sharma2022human](assets/cell-death.png){width=50%}
 
-### Downloading data
+### Downloading Data
 
 The dataset's GEO accession number is GSE193414. The code below will downloads the raw counts and its metadata into a .rds format. @davis2007geoquery
 
@@ -74,7 +75,7 @@ if (!file.exists(paste(accession,"rawCounts.rds", sep = "_"))) {
 ```
 ## Data Processing
 
-### Process metadata 
+### Process Metadata 
 
 The metadata has alot of information but we only need the first column which indicates the sample and its treatment group and the column that indicates the replicate number. With this, we can process the metadata to group each sample with its treatment group.
 
@@ -93,7 +94,7 @@ sampleMetadata$Treatment_group <- treatmentGroup
 head(sampleMetadata)
 ```
 
-### Initial data preparation
+### Initial Data Preparation
 
 Looking at the raw counts, the genes seem to be in a HUGO format.
 
@@ -121,7 +122,7 @@ Lastly, we will check if the count matrix has any duplicate gene counts.
 length(unique(rownames(countMatrix))) == length(rownames(countMatrix)) # no duplicate gene counts.
 ```
 
-### Filtering low counts
+### Filtering Out Genes with Low Expression Counts
 Rows may have expression counts of 0 in all samples, and these can be filtered out to avoid heavy computation. This dataset there are 3 control samples so we will filter out those where at least 3 samples have expression counts greater than 1cpm (counts per million). @robinson2010edger
 ```{r}
 atleast3 <- rowSums( edgeR::cpm(countMatrix) > 1 ) >= 3
@@ -130,7 +131,7 @@ dim(countMatrix)
 dim(filteredCM) # more than half of the genes are filtered out
 ```
 
-### Initial analysis
+### Initial Analysis
 
 Now, we look at the expression levels of NFATC2, the gene which encodes the NFAT1 transcription factor. The patient carried a homozygous 4–base-pair deletion of the gene NFATC2. This variant causes a frame shift leading to a premature stop codon, which significantly reduced NFATC2 transcript abundance and resulted in an undetectable NFAT1 expression. We can see that the samples with the WT-NFATC2 (prefix with "Res") treatment has significantly higher NFATC2 expression than the patient samples. @sharma2022human
 
@@ -139,7 +140,7 @@ Now, we look at the expression levels of NFATC2, the gene which encodes the NFAT
 NFAT1Counts <- countMatrix["NFATC2",] 
 NFAT1Counts
 ```
-### TMM normalisation
+### TMM Normalisation
 TMM is applied to normalise the raw count matrix. @robinson2010edger
 ```{r}
 dgeList = edgeR::DGEList(counts=filteredCM, group=sampleMetadata$Treatment_group)

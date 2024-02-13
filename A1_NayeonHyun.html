@@ -378,29 +378,35 @@ display: none;
 
 <div id="TOC">
 <ul>
-<li><a href="#why-i-chose-this-dataset" id="toc-why-i-chose-this-dataset">Why I chose this dataset</a></li>
-<li><a href="#basic-information-of-the-dataset" id="toc-basic-information-of-the-dataset">Basic information of the
-dataset</a></li>
+<li><a href="#introduction" id="toc-introduction">Introduction</a>
+<ul>
+<li><a href="#why-i-chose-this-dataset" id="toc-why-i-chose-this-dataset">Why I Chose This Dataset</a></li>
+<li><a href="#basic-information-on-the-dataset" id="toc-basic-information-on-the-dataset">Basic Information on the
+Dataset</a></li>
 <li><a href="#downloading-data" id="toc-downloading-data">Downloading
-data</a></li>
+Data</a></li>
+</ul></li>
 <li><a href="#data-processing" id="toc-data-processing">Data
 Processing</a>
 <ul>
 <li><a href="#process-metadata" id="toc-process-metadata">Process
-metadata</a></li>
-<li><a href="#initial-data-preparation" id="toc-initial-data-preparation">Initial data preparation</a></li>
-<li><a href="#filtering-low-counts" id="toc-filtering-low-counts">Filtering low counts</a></li>
+Metadata</a></li>
+<li><a href="#initial-data-preparation" id="toc-initial-data-preparation">Initial Data Preparation</a></li>
+<li><a href="#filtering-out-genes-with-low-expression-counts" id="toc-filtering-out-genes-with-low-expression-counts">Filtering Out
+Genes with Low Expression Counts</a></li>
 <li><a href="#initial-analysis" id="toc-initial-analysis">Initial
-analysis</a></li>
+Analysis</a></li>
 <li><a href="#tmm-normalisation" id="toc-tmm-normalisation">TMM
-normalisation</a></li>
+Normalisation</a></li>
 </ul></li>
 <li><a href="#references" id="toc-references">References</a></li>
 </ul>
 </div>
 
+<div id="introduction" class="section level2">
+<h2>Introduction</h2>
 <div id="why-i-chose-this-dataset" class="section level3">
-<h3>Why I chose this dataset</h3>
+<h3>Why I Chose This Dataset</h3>
 <p>For my dataset, I chose the paper, <a href="https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE193414">Human
 germline biallelic complete NFAT1 deficiency causes the triad of joint
 contractures, osteochondromas, and susceptibility to B cell
@@ -414,8 +420,8 @@ that has a complete deficiency of NAFT1 and analyzes the affect of this
 deficiency. They also sequence his parents, who have a consanguineous
 relationship. <span class="citation">Sharma et al. (2022)</span></p>
 </div>
-<div id="basic-information-of-the-dataset" class="section level3">
-<h3>Basic information of the dataset</h3>
+<div id="basic-information-on-the-dataset" class="section level3">
+<h3>Basic Information on the Dataset</h3>
 <p>There are 18 bulk RNA-seq samples from three patients. One patient is
 the first reported case of human complete NFAT1 deficiency. The other
 two are his parents who had a consanguineous relationship. Illumina
@@ -438,7 +444,7 @@ chondrocytes. <span class="citation">Sharma et al. (2022)</span></div>
 </div>
 </div>
 <div id="downloading-data" class="section level3">
-<h3>Downloading data</h3>
+<h3>Downloading Data</h3>
 <p>The dataset’s GEO accession number is GSE193414. The code below will
 downloads the raw counts and its metadata into a .rds format. <span class="citation">Davis and Meltzer (2007)</span></p>
 <pre class="r"><code># Downloading metadata
@@ -460,10 +466,11 @@ if (!file.exists(paste(accession,&quot;rawCounts.rds&quot;, sep = &quot;_&quot;)
   countMatrix &lt;- readRDS(paste(accession, &quot;rawCounts.rds&quot;, sep = &quot;_&quot;))
 }</code></pre>
 </div>
+</div>
 <div id="data-processing" class="section level2">
 <h2>Data Processing</h2>
 <div id="process-metadata" class="section level3">
-<h3>Process metadata</h3>
+<h3>Process Metadata</h3>
 <p>The metadata has alot of information but we only need the first
 column which indicates the sample and its treatment group and the column
 that indicates the replicate number. With this, we can process the
@@ -489,7 +496,7 @@ head(sampleMetadata)</code></pre>
 ## GSM5799909 N3-Patient-PMAIono         3 Patient-PMAIono</code></pre>
 </div>
 <div id="initial-data-preparation" class="section level3">
-<h3>Initial data preparation</h3>
+<h3>Initial Data Preparation</h3>
 <p>Looking at the raw counts, the genes seem to be in a HUGO format.</p>
 <pre class="r"><code># Read raw counts
 countMatrix &lt;- readRDS(paste(accession, &quot;rawCounts.rds&quot;, sep = &quot;_&quot;))
@@ -511,8 +518,8 @@ counts.</p>
 <pre class="r"><code>length(unique(rownames(countMatrix))) == length(rownames(countMatrix)) # no duplicate gene counts.</code></pre>
 <pre><code>## [1] TRUE</code></pre>
 </div>
-<div id="filtering-low-counts" class="section level3">
-<h3>Filtering low counts</h3>
+<div id="filtering-out-genes-with-low-expression-counts" class="section level3">
+<h3>Filtering Out Genes with Low Expression Counts</h3>
 <p>Rows may have expression counts of 0 in all samples, and these can be
 filtered out to avoid heavy computation. This dataset there are 3
 control samples so we will filter out those where at least 3 samples
@@ -525,7 +532,7 @@ dim(countMatrix) </code></pre>
 <pre><code>## [1] 12925    18</code></pre>
 </div>
 <div id="initial-analysis" class="section level3">
-<h3>Initial analysis</h3>
+<h3>Initial Analysis</h3>
 <p>Now, we look at the expression levels of NFATC2, the gene which
 encodes the NFAT1 transcription factor. The patient carried a homozygous
 4–base-pair deletion of the gene NFATC2. This variant causes a frame
@@ -545,7 +552,7 @@ NFAT1Counts</code></pre>
 ##        25646        15921        21739        49432        30080        44380</code></pre>
 </div>
 <div id="tmm-normalisation" class="section level3">
-<h3>TMM normalisation</h3>
+<h3>TMM Normalisation</h3>
 <p>TMM is applied to normalise the raw count matrix. <span class="citation">Robinson, McCarthy, and Smyth (2010)</span></p>
 <pre class="r"><code>dgeList = edgeR::DGEList(counts=filteredCM, group=sampleMetadata$Treatment_group)
 dgeList = edgeR::calcNormFactors(dgeList)
