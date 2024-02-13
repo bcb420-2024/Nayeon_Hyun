@@ -77,7 +77,7 @@ if (!file.exists(paste(accession,"rawCounts.rds", sep = "_"))) {
 
 ### Process Metadata 
 
-The metadata has alot of information but we only need the first column which indicates the sample and its treatment group and the column that indicates the replicate number. With this, we can process the metadata to group each sample with its treatment group.
+The metadata has alot of information but we only need the first column which indicates the sample and its treatment group and the column that indicates the replicate number. With this, we can process the metadata to group each sample with its treatment group. I also added a column that corresponds to the column names in the count matrix to link the two data frames together with its respective sample.
 
 ```{r}
 fullMetadata <- metadata@phenoData@data
@@ -86,11 +86,19 @@ sampleMetadata$Replicate <- fullMetadata$"replicate number:ch1"
 
 # we need to add a column for the treatment group (ex. Rescue-unstim, Patient-IL1B).
 treatmentGroup <- c()
+cmSampleName <- c()
 for (title in sampleMetadata$title) {
   splitDashes <- unlist(strsplit(title, "-", perl=TRUE))
   treatmentGroup <- c(treatmentGroup, paste(splitDashes[2], splitDashes[3], sep = "-"))
+  if (splitDashes[2] == "Patient") {
+    cmSampleName <- c(cmSampleName, paste0("P", substring(splitDashes[1], 2, 2), "_", splitDashes[3]))
+  } else {
+    cmSampleName <- c(cmSampleName, paste0("Res", substring(splitDashes[1], 2, 2), "_", splitDashes[3]))
+  }
+  
 }
 sampleMetadata$Treatment_group <- treatmentGroup
+sampleMetadata$CountMatrix_colname <- cmSampleName
 head(sampleMetadata)
 ```
 
@@ -140,6 +148,7 @@ Now, we look at the expression levels of NFATC2, the gene which encodes the NFAT
 NFAT1Counts <- countMatrix["NFATC2",] 
 NFAT1Counts
 ```
+
 ### TMM Normalisation
 TMM is applied to normalise the raw count matrix. @robinson2010edger
 ```{r}
@@ -148,5 +157,27 @@ dgeList = edgeR::calcNormFactors(dgeList)
 normalisedCountMatrix <- edgeR::cpm(dgeList)
 normalisedCountMatrix["NFATC2",]
 ```
+We now analyze the sample separation using a MDS plot post normalization to determine the distance between samples.  @ritchie2015limma
+
+```{r}
+# Plot by treatment group
+limma::plotMDS(dgeList, labels=NULL,pch=1, 
+               col = c("red","orange","purple","brown", "blue", "green")[factor(sampleMetadata$Treatment_group)])
+par(cex = 0.7) # change legend font size
+legend("topleft", legend = levels(factor(sampleMetadata$Treatment_group)), 
+       col = c("red","orange","purple","brown", "blue", "green"), pch = 1, title = "Treatment Type", )
+```
+
+Now, when plotted by each replicate, we can identify which of the dots in the prior plot belongs to which replicate. This allows us to see the significant separation between the Patient emtpy vector samples and the Rescued WT-NFACT2 samples from the same replicate. @ritchie2015limma
+
+```{r}
+# Plot by replicate
+limma::plotMDS(dgeList, labels=NULL,pch=1, 
+               col = c("red","orange","purple")[factor(sampleMetadata$Replicate)])
+par(cex = 1) # change legend font size
+legend("topleft", legend = levels(factor(sampleMetadata$Replicate)), 
+       col = c("red","orange","purple"), pch = 1, title = "Replicate", )
+```
+
 ## References
 
