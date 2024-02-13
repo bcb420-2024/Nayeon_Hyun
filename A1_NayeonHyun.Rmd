@@ -168,7 +168,7 @@ legend("topleft", legend = levels(factor(sampleMetadata$Treatment_group)),
        col = c("red","orange","purple","brown", "blue", "green"), pch = 1, title = "Treatment Type", )
 ```
 
-Now, when plotted by each replicate, we can identify which of the dots in the prior plot belongs to which replicate. This allows us to see the significant separation between the Patient emtpy vector samples and the Rescued WT-NFACT2 samples from the same replicate. @ritchie2015limma
+Now, when plotted by each replicate, we can identify which of the dots in the prior plot belongs to which replicate. This allows us to see the significant separation between the Patient empty vector samples and the Rescued WT-NFACT2 samples from the same replicate. @ritchie2015limma
 
 ```{r}
 # Plot by replicate
