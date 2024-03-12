@@ -1,0 +1,463 @@
+---
+title: "BCB420 Assignment 2 - Nayeon Hyun"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+date: "2024-03-10"
+name: Nayeon Hyun
+bibliography: A2_references.bib
+---
+
+```{r, include=FALSE}
+# Install/load packages
+if (! requireNamespace("BiocManager", quietly = TRUE)) {
+  install.packages("BiocManager")
+}
+
+if (! requireNamespace("Biobase", quietly = TRUE)) {
+  BiocManager::install("Biobase")
+}
+
+if (!requireNamespace("edgeR", quietly = TRUE)) {
+  install.packages("edgeR")
+}
+
+if(!requireNamespace("ComplexHeatmap", quietly = TRUE)) {
+  BiocManager::install("ComplexHeatmap")
+}
+
+if(!requireNamespace("gprofiler2", quietly = TRUE)) {
+  BiocManager::install("gprofiler2")
+}
+
+library(edgeR)
+library(ComplexHeatmap)
+library(circlize)
+library(gprofiler2)
+```
+
+## Introduction
+
+For my dataset, I chose the paper, [Human germline biallelic complete NFAT1 deficiency causes the triad of joint contractures, osteochondromas, and susceptibility to B cell malignancy](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE193414). This dataset was downloaded from GEO and its accession ID is GSE193414. @sharma2022human
+
+There are 18 bulk RNA-seq samples from three patients. One patient is the first reported case of human complete NFAT1 deficiency. The other two are his parents who had a consanguineous relationship. Half of the 18 samples (labelled as "patient") are infected with an empty vector, thus is the negative control. The other 9 samples are infected with WT-NFATC2 which is the test condition. @sharma2022human
+
+Each replicate's patient and rescue samples were treated with PMAIonomycin and IL-1b. Thus there are 3 treatment groups, one untreated, PMAIono, and IL1b for each replicate's patient and rescue samples. @sharma2022human
+
+To start the differential expression analysis, we will get the normalized count matrix and processed metadata from Assignment 1.
+
+```{r}
+## load normalised expression data from A1
+path <- file.path(getwd(), "GSE193414_normalizedCounts.rds")
+normalizedCM <- readRDS(path)
+
+## load processed metadata from A1
+path <- file.path(getwd(), "GSE193414_processedMetadata.rds")
+metadata <- readRDS(path)
+```
+
+## Differential Gene Expression
+
+Looking at the MDS plots from Assignment 1, we can see the significant separation between the Patient empty vector samples and the Rescued WT-NFACT2 samples from the same replicate. @ritchie2015limma. Thus, I will look at how genes are differentially expressed between the three treatment groups of the patient samples and rescue samples. 
+
+```{r, fig.cap="<b>Figure 1:</b> MDS plot of normalised counts where its colored by the 6 treatment types."}
+# Plot by treatment group
+limma::plotMDS(normalizedCM, labels=NULL,pch=1, 
+               col = c("red","orange","purple","brown", "blue", "green")[factor(metadata$Treatment_group)])
+par(cex = 0.7) # change legend font size
+legend("topleft", legend = levels(factor(metadata$Treatment_group)), 
+       col = c("red","orange","purple","brown", "blue", "green"), pch = 1, title = "Treatment Type", )
+```
+
+```{r, fig.cap="<b>Figure 2:</b> MDS plot of normalised counts where its colored by the 3 replicates."}
+# Plot by replicate
+limma::plotMDS(normalizedCM, labels=NULL,pch=1, 
+               col = c("red","orange","purple")[factor(metadata$Replicate)])
+par(cex = 1) # change legend font size
+legend("topleft", legend = levels(factor(metadata$Replicate)), 
+       col = c("red","orange","purple"), pch = 1, title = "Replicate", )
+```
+
+I will alter the metadata to add a column for this. I will also edit the `Treatment_group` column to exclude its sample type. For example, "Patient-unstim" and "Rescue-unstim" samples will have a treatment group as "unstim".
+
+```{r}
+sampleType <- c()
+treatmentGroup <- c()
+for (group in metadata$Treatment_group) {
+  splitDashes <- unlist(strsplit(group, "-", perl=TRUE))
+  sampleType <- c(sampleType, splitDashes[1])
+  treatmentGroup <- c(treatmentGroup, splitDashes[2])
+}
+metadata$Sample_type = sampleType
+metadata$Treatment_group = treatmentGroup
+head(metadata)
+
+```
+We will now look at the MDS plots for the new columns. @ritchie2015limma
+
+```{r, fig.cap="<b>Figure 3:</b> MDS plot of normalised counts where its colored by the newly simplified 3 treatment groups"}
+# Plot by new treatment group
+limma::plotMDS(normalizedCM, labels=NULL,pch=1, 
+               col = c("red","orange","purple")[factor(metadata$Treatment_group)])
+par(cex = 1) # change legend font size
+legend("topleft", legend = levels(factor(metadata$Treatment_group)), 
+       col = c("red","orange","purple"), pch = 1, title = "Treatment Group", )
+```
+```{r, fig.cap="<b>Figure 4:</b> MDS plot of normalised counts where its colored by the 2 sample types."}
+# Plot by sample type
+limma::plotMDS(normalizedCM, labels=NULL,pch=1, 
+               col = c("red","purple")[factor(metadata$Sample_type)])
+par(cex = 1) # change legend font size
+legend("topleft", legend = levels(factor(metadata$Sample_type)), 
+       col = c("red","purple"), pch = 1, title = "Sample Type", )
+```
+
+There are three treatments groups, so I will first create two different counts matrices, for unstim vs IL1B, and unstim vs PMAIono. 
+```{r}
+unstimVsIL1B <- metadata[metadata$Treatment_group == "unstim" | metadata$Treatment_group == "IL1B",]
+normalizedCM_IL1B <- normalizedCM[,unstimVsIL1B$CountMatrix_colname]
+
+unstimVsPMAIono <- metadata[metadata$Treatment_group == "unstim" | metadata$Treatment_group == "PMAIono",]
+normalizedCM_PMAIono<- normalizedCM[,unstimVsPMAIono$CountMatrix_colname]
+```
+
+### Designing Model
+The model would use both the sample type and the treatment type. We will use the `edgeR` package for our modelling. @robinson2010edger
+
+```{r}
+modelIL1B <- model.matrix(~ unstimVsIL1B$Sample_type + unstimVsIL1B$Treatment_group)
+modelPMAIono <- model.matrix(~ unstimVsPMAIono$Sample_type + unstimVsPMAIono$Treatment_group)
+```
+
+### Fitting Counts into Model
+We now fit the counts into the model. @robinson2010edger
+```{r}
+dgeListIL1B = DGEList(counts=normalizedCM_IL1B, group=unstimVsIL1B$Treatment_group)
+dgeListIL1B <- estimateDisp(dgeListIL1B, modelIL1B)
+IL1BFit <- glmQLFit(dgeListIL1B, modelIL1B)
+
+dgeListPMAIono = DGEList(counts=normalizedCM_PMAIono, group=unstimVsPMAIono$Treatment_group)
+dgeListPMAIono <- estimateDisp(dgeListPMAIono, modelPMAIono)
+PMAIonoFit <- glmQLFit(dgeListPMAIono, modelPMAIono)
+```
+
+The Quasilikelihood model is used to calculate the differential expression. @robinson2010edger
+```{r}
+qlfIL1B <- glmQLFTest(IL1BFit, coef="unstimVsIL1B$Treatment_groupunstim")
+knitr::kable(topTags(qlfIL1B),type='html',row.names=TRUE)
+qlfPMAIono <- glmQLFTest(PMAIonoFit, coef="unstimVsPMAIono$Treatment_groupunstim")
+knitr::kable(topTags(qlfPMAIono),type='html',row.names=TRUE)
+```
+
+### Multiple hypothesis testing
+We will now look for the number of genes that pass the threshold of p-value < 0.05, we can find the number of genes that pass the threshold. @robinson2010edger
+
+```{r}
+
+qlfIL1BHits <- topTags(qlfIL1B, sort.by = "PValue", n = nrow(normalizedCM_IL1B))
+dim(qlfIL1BHits$table)
+length(which(qlfIL1BHits$table$PValue < 0.05)) 
+length(which(qlfIL1BHits$table$FDR < 0.05))
+
+FDR<-p.adjust(qlfIL1BHits$table$PValue,method="BH")
+sum(FDR<0.05) 
+
+
+qlfPMAIonoHits <- topTags(qlfPMAIono, sort.by = "PValue", n = nrow(normalizedCM_PMAIono))
+dim(qlfPMAIonoHits$table)
+length(which(qlfPMAIonoHits$table$PValue < 0.05)) 
+length(which(qlfPMAIonoHits$table$FDR < 0.05))
+
+FDR<-p.adjust(qlfPMAIonoHits$table$PValue,method="BH")
+sum(FDR<0.05) 
+```
+There are 12925 total genes in both hits, but 4362 of the IL1B hits pass the threshold while 4953 of the PMAIono hits pass the p-value threshold. 2872 of the IL1B hits and 3782 of the PMAIono hits pass the correction.
+
+### MA Plot
+To compare the log fold change against the mean of the normalized counts, we will use an MA plot. The points in blue are the features that have an adjusted p-value smaller than alpha of 0.05.
+
+```{r, fig.cap="<b>Figure 5:</b> MA plot of normalised counts for IL1B injection. The significantly differentially expressed genes are colored in blue"}
+
+plot(qlfIL1B$table$logCPM, qlfIL1B$table$logFC, pch = 16, col = "grey", cex = 0.5, 
+     xlab = "Mean of Normalised Counts", ylab = "Log2 Fold Change",
+     main = "MA Plot for IL1B, alpha = 0.05") +
+     abline(h = 0, col = "black", lty = 3) +
+    points(qlfIL1B$table$logCPM[ qlfIL1BHits$table$PValue < 0.05], 
+       qlfIL1B$table$logFC[qlfIL1BHits$table$PValue < 0.05], 
+       pch = 16, col = "blue", cex = 0.5)
+
+```
+```{r, fig.cap="<b>Figure 6:</b> MA plot of normalised counts for PMAIono injection. The significantly differentially expressed genes are colored in blue"}
+
+plot(qlfPMAIono$table$logCPM, qlfPMAIono$table$logFC, pch = 16, col = "grey", cex = 0.5, 
+     xlab = "Mean of Normalised Counts", ylab = "Log2 Fold Change",
+     main = "MA Plot for PMAIono, alpha = 0.05") +
+     abline(h = 0, col = "black", lty = 3) +
+    points(qlfPMAIono$table$logCPM[ qlfPMAIonoHits$table$PValue < 0.05], 
+       qlfPMAIono$table$logFC[qlfPMAIonoHits$table$PValue < 0.05], 
+       pch = 16, col = "blue", cex = 0.5)
+
+```
+
+### Heatmaps
+This annotated heatmap visualizes the top hits, which are the differentially expressed genes with a p-value < 0.05 for the IL1B vs unstim (control) data. The package `ComplexHeatmap` is used. @gu2016complex
+
+```{r, fig.cap="<b>Figure 7:</b> Heatmap of differentially expressed genes for IL1B injected vs control"}
+topHitsIL1B <-rownames(qlfIL1BHits$table)[qlfIL1BHits$table$PValue<0.05]
+heatmapMatrixIL1B <- t(scale(t(normalizedCM_IL1B)))
+heatmapMatrixTophitsIL1B <- t(scale(t(heatmapMatrixIL1B[which(rownames(heatmapMatrixIL1B) %in% topHitsIL1B),])))
+
+if (min(heatmapMatrixTophitsIL1B) == 0) {
+  heatmap_col = colorRamp2(c( 0, max(heatmapMatrixTophitsIL1B)), c( "white", "red"))
+} else {
+  heatmap_col = colorRamp2(c(min(heatmapMatrixTophitsIL1B), 0,
+  max(heatmapMatrixTophitsIL1B)),
+  c("blue", "white", "red"))
+}
+
+# creating unique labels
+treatmentGroups <- c("unstim", "IL1B")
+treatmentGroupsColors <- rainbow(n = length(treatmentGroups))
+names(treatmentGroupsColors) <- treatmentGroups
+sampleTypes <- c("Patient", "Rescue")
+sampleTypesColors <- rainbow(n = length(sampleTypes))
+names(sampleTypesColors) <- sampleTypes
+
+# creating annotation labels
+ha_pat <- HeatmapAnnotation(
+  df = data.frame(Treatment_group = unstimVsIL1B$Treatment_group, 
+                   Sample_type = unstimVsIL1B$Sample_type ), 
+  col = list(Treatment_group = treatmentGroupsColors, 
+             Sample_type = sampleTypesColors),
+  show_legend = TRUE)
+
+#generation of heatmap
+heatmapIL1B <- Heatmap(as.matrix(heatmapMatrixTophitsIL1B),
+                       top_annotation = ha_pat,
+                       cluster_rows = TRUE,
+                       cluster_columns = TRUE,
+                       show_row_dend = TRUE,
+                       show_column_dend = TRUE,
+                       col=heatmap_col,
+                       show_column_names = FALSE,
+                       show_row_names = FALSE,
+                       show_heatmap_legend = TRUE,
+                       column_title =("Top hits Unstimulated vs IL1B Injection"),
+                       use_raster = FALSE
+  )
+heatmapIL1B
+```
+```{r, fig.cap="<b>Figure 7:</b> Heatmap of differentially expressed genes for PMAIono injected vs control"}
+topHitsPMAIono <-rownames(qlfPMAIonoHits$table)[qlfPMAIonoHits$table$PValue<0.05]
+heatmapMatrixPMAIono <- t(scale(t(normalizedCM_PMAIono)))
+heatmapMatrixTophitsPMAIono <- t(scale(t(heatmapMatrixPMAIono[which(rownames(heatmapMatrixPMAIono) %in% topHitsPMAIono),])))
+
+if (min(heatmapMatrixTophitsPMAIono) == 0) {
+  heatmap_col = colorRamp2(c( 0, max(heatmapMatrixTophitsPMAIono)), c( "white", "red"))
+} else {
+  heatmap_col = colorRamp2(c(min(heatmapMatrixTophitsPMAIono), 0,
+  max(heatmapMatrixTophitsPMAIono)),
+  c("blue", "white", "red"))
+}
+
+# creating unique labels
+treatmentGroups <- c("unstim", "PMAIono")
+treatmentGroupsColors <- rainbow(n = length(treatmentGroups))
+names(treatmentGroupsColors) <- treatmentGroups
+sampleTypes <- c("Patient", "Rescue")
+sampleTypesColors <- rainbow(n = length(sampleTypes))
+names(sampleTypesColors) <- sampleTypes
+
+# creating annotation labels
+ha_pat <- HeatmapAnnotation(
+  df = data.frame(Treatment_group = unstimVsPMAIono$Treatment_group, 
+                   Sample_type = unstimVsPMAIono$Sample_type ), 
+  col = list(Treatment_group = treatmentGroupsColors, 
+             Sample_type = sampleTypesColors),
+  show_legend = TRUE)
+
+#generation of heatmap
+heatmapPMAIono <- Heatmap(as.matrix(heatmapMatrixTophitsPMAIono),
+                       top_annotation = ha_pat,
+                       cluster_rows = TRUE,
+                       cluster_columns = TRUE,
+                       show_row_dend = TRUE,
+                       show_column_dend = TRUE,
+                       col=heatmap_col,
+                       show_column_names = FALSE,
+                       show_row_names = FALSE,
+                       show_heatmap_legend = TRUE,
+                       column_title =("Top hits Unstimulated vs PMAIono Injection"),
+                       use_raster = FALSE
+  )
+heatmapPMAIono
+```
+We can see from the heatmaps that the Treatment groups clustering is more dependent which doesn't really align with the MDS plot since we saw that the differing of sample types from the same replicate had significant differential expression.
+
+## Thresholded over-representation analysis
+I chose the thresholded list method because it was simpler to use.
+
+These are the preliminary steps prior to running g:profiler.
+```{r}
+# find the genes that were over or underexpressed
+IL1BUp <- qlfIL1B$table[qlfIL1B$table$PValue < 0.05 & qlfIL1B$table$logFC > 0, ] #upregulated genes
+IL1BDown <- qlfIL1B$table[qlfIL1B$table$PValue < 0.05 & qlfIL1B$table$logFC < 0, ] #downregulated genes
+PMAIonoUp <- qlfPMAIono$table[qlfPMAIono$table$PValue < 0.05 & qlfPMAIono$table$logFC > 0, ] #upregulated genes
+PMAIonoDown <- qlfPMAIono$table[qlfPMAIono$table$PValue < 0.05 & qlfPMAIono$table$logFC < 0, ] #downregulated genes
+
+# save these genes for pathway analysis in gprofiler directory. 
+if(!dir.exists("gprofiler")){
+  dir.create("gprofiler")
+}
+write.table(x=rownames(qlfIL1B$table), file=file.path(getwd(),"gprofiler","IL1Bgenes.txt"), sep = "\t",row.names = FALSE, col.names = FALSE,quote = FALSE)
+write.table(x=rownames(IL1BUp), file=file.path(getwd(),"gprofiler","IL1Bupreg.txt"), sep = "\t",row.names = FALSE, col.names = FALSE,quote = FALSE)
+write.table(x=rownames(IL1BDown), file=file.path(getwd(),"gprofiler","IL1Bdown.txt"), sep = "\t",row.names = FALSE, col.names = FALSE,quote = FALSE)
+write.table(x=rownames(qlfPMAIono$table), file=file.path(getwd(),"gprofiler","PMAIonogenes.txt"), sep = "\t",row.names = FALSE, col.names = FALSE,quote = FALSE)
+write.table(x=rownames(PMAIonoUp), file=file.path(getwd(),"gprofiler","PMAIonoupreg.txt"), sep = "\t",row.names = FALSE, col.names = FALSE,quote = FALSE)
+write.table(x=rownames(PMAIonoDown), file=file.path(getwd(),"gprofiler","PMAIonodown.txt"), sep = "\t",row.names = FALSE, col.names = FALSE,quote = FALSE)
+```
+
+Then, I initialize variables for g:profiler using the list of genes saved in the previous step. @kolberg2020gprofiler2
+```{r}
+#where to put all the generated files
+workingDir <- file.path(getwd(), "gprofiler")
+
+# where to find the data files needed to run the analysis
+dataDir <-  file.path(getwd(), "gprofiler")
+
+# default max size of the genesets 
+maxGsSize <- 500
+
+# default min size of the genesets 
+minGsSize <- 10
+
+#min intersection between your genelist and the geneset 
+minInteraction <- 10
+
+# organism parameter used for g:profiler.  
+organism <- "hsapiens"
+
+# the below script will automatically download the latest gmt file from
+# baderlab webstie.   
+destGMTFile = ""
+
+getQuerySet <- function(genelistFile) {
+  # takes in the file name containing the list of genes to be used for analysis
+  #load in the file
+  currentGenelist <- read.table(file = file.path(dataDir, genelistFile),
+                               header = FALSE, sep = "\t", quote = "",
+                               stringsAsFactors = FALSE)
+  return (currentGenelist$V1)
+}
+```
+
+Now we will run g:profiler for IL1B gene tables (all genes, upregulated and downregulated). @kolberg2020gprofiler2
+
+```{r}
+# all genes in IL1B
+gprofilerResultsIL1Bgenes <- gost(query = getQuerySet("IL1Bgenes.txt") ,
+                          significant=FALSE,
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = organism,
+                          source = c("REAC","WP","GO:BP"))
+# get the gprofiler results table
+enrichmentResultsIL1B <- gprofilerResultsIL1Bgenes$result
+    
+dim(enrichmentResultsIL1B)
+
+# upregulated genes in IL1B
+gprofilerResultsIL1BUp <- gost(query = getQuerySet("IL1Bupreg.txt") ,
+                          significant=FALSE,
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = organism,
+                          source = c("REAC","WP","GO:BP"))
+# get the gprofiler results table
+enrichmentResultsIL1BUp <- gprofilerResultsIL1BUp$result
+    
+dim(enrichmentResultsIL1BUp)
+
+# downregulated genes in IL1B
+gprofilerResultsIL1BDown <- gost(query = getQuerySet("IL1Bdown.txt") ,
+                          significant=FALSE,
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = organism,
+                          source = c("REAC","WP","GO:BP"))
+# get the gprofiler results table
+enrichmentResultsIL1BDown <- gprofilerResultsIL1BDown$result
+    
+dim(enrichmentResultsIL1BDown)
+```
+
+The following results show the number of genesets that have a p-value < 0.05 in the all genes, upregulated and downregulated genes respectively.
+
+```{r}
+print(dim(enrichmentResultsIL1B[enrichmentResultsIL1B[3] < 0.05, ])) #for all genes
+print(dim(enrichmentResultsIL1BUp[enrichmentResultsIL1BUp[3] < 0.05, ])) #for upregulated genes
+print(dim(enrichmentResultsIL1BDown[enrichmentResultsIL1BDown[3] < 0.05, ])) #for downregulated genes
+```
+
+Now, we repeat for PMAIono genes. We will first run gprofiler. @kolberg2020gprofiler2
+
+```{r}
+# all genes in PMAIono
+gprofilerResultsPMAIonogenes <- gost(query = getQuerySet("PMAIonogenes.txt") ,
+                          significant=FALSE,
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = organism,
+                          source = c("REAC","WP","GO:BP"))
+# get the gprofiler results table
+enrichmentResultsPMAIono <- gprofilerResultsPMAIonogenes$result
+    
+dim(enrichmentResultsPMAIono)
+
+# upregulated genes in PMAIono
+gprofilerResultsPMAIonoUp <- gost(query = getQuerySet("PMAIonoupreg.txt") ,
+                          significant=FALSE,
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = organism,
+                          source = c("REAC","WP","GO:BP"))
+# get the gprofiler results table
+enrichmentResultsPMAIonoUp <- gprofilerResultsPMAIonoUp$result
+    
+dim(enrichmentResultsPMAIonoUp)
+
+# downregulated genes in PMAIono
+gprofilerResultsPMAIonoDown <- gost(query = getQuerySet("PMAIonodown.txt") ,
+                          significant=FALSE,
+                          ordered_query = FALSE,
+                          exclude_iea=TRUE,
+                          correction_method = "fdr",
+                          organism = organism,
+                          source = c("REAC","WP","GO:BP"))
+# get the gprofiler results table
+enrichmentResultsPMAIonoDown <- gprofilerResultsPMAIonoDown$result
+    
+dim(enrichmentResultsPMAIonoDown)
+```
+
+The following results show the number of genesets that have a p-value < 0.05 in the all genes, upregulated and downregulated genes respectively.
+
+```{r}
+print(dim(enrichmentResultsIL1B[enrichmentResultsPMAIono[3] < 0.05, ])) #for all genes
+print(dim(enrichmentResultsIL1BUp[enrichmentResultsPMAIonoUp[3] < 0.05, ])) #for upregulated genes
+print(dim(enrichmentResultsIL1BDown[enrichmentResultsPMAIonoDown[3] < 0.05, ])) #for downregulated genes
+```
+
+## Interpretation
+The over-representation results support conclusions or mechanism discussed in the original paper. As the paper states that their gene enrichment analysis showed notable enrichment of cell proliferation pathways in response to the EV and NFACT2 wildtype. @sharma2022human
+
+Some papers I found to support this matter is @peng2001nfatc1 and @wang2009transcription where they both show that NFATC2's effect on T-cell and B-cell activation and differentiation.
+
+## References
+
