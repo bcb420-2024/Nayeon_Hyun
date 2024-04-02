@@ -6,3 +6,6 @@ repo for bcb420 for Nayeon Hyun
 
 ## Assignment 2
 [Assignment 2 html](https://github.com/bcb420-2024/Nayeon_Hyun/blob/main/A2_NayeonHyun.html) 
+
+## Assignment 3
+[Assignment 2 html](https://github.com/bcb420-2024/Nayeon_Hyun/blob/main/A3_NayeonHyun.html) 
